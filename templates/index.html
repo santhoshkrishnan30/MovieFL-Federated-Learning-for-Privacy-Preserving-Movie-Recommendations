@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Federated Learning Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .panel { background: #f8f9fa; padding: 20px; border-radius: 5px; margin-bottom: 20px; }
+        .client-badge { 
+            background: #4e73df; color: white; padding: 5px 10px; 
+            border-radius: 20px; display: inline-block; margin: 5px;
+        }
+        .client-ip { font-size: 0.8em; opacity: 0.8; }
+        .chart-container { display: flex; flex-wrap: wrap; gap: 20px; }
+        .chart-box { flex: 1; min-width: 300px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Federated Learning Dashboard</h1>
+        
+        <div class="panel">
+            <h2>Training Status</h2>
+            <p><strong>Round:</strong> <span id="currentRound">0</span>/<span id="maxRounds">5</span></p>
+            <p><strong>Status:</strong> <span id="trainingStatus">Initializing...</span></p>
+            <p><strong>Clients Ready:</strong> <span id="readyClients">0</span>/<span id="minClients">1</span></p>
+        </div>
+        
+        <div class="panel">
+            <h2>Connected Clients</h2>
+            <div id="clientList"></div>
+        </div>
+        
+        <div class="chart-container">
+            <div class="chart-box">
+                <h3>Training Loss (RMSE)</h3>
+                <canvas id="lossChart"></canvas>
+            </div>
+            <div class="chart-box">
+                <h3>Model Accuracy</h3>
+                <canvas id="accuracyChart"></canvas>
+            </div>
+        </div>
+        
+        <div class="panel" id="comparisonPanel" style="display: none;">
+            <h2>Comparison Results</h2>
+            <img id="comparisonImage" style="max-width: 100%;">
+        </div>
+    </div>
+
+    <script>
+        // Initialize charts
+        const lossChart = new Chart(
+            document.getElementById('lossChart').getContext('2d'),
+            {
+                type: 'line',
+                data: { labels: [], datasets: [{
+                    label: 'RMSE Loss',
+                    data: [],
+                    borderColor: 'rgb(255, 99, 132)',
+                    backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                    tension: 0.1
+                }]},
+                options: { responsive: true }
+            }
+        );
+        
+        const accuracyChart = new Chart(
+            document.getElementById('accuracyChart').getContext('2d'),
+            {
+                type: 'line',
+                data: { labels: [], datasets: [{
+                    label: 'Accuracy',
+                    data: [],
+                    borderColor: 'rgb(54, 162, 235)',
+                    backgroundColor: 'rgba(54, 162, 235, 0.1)',
+                    tension: 0.1
+                }]},
+                options: { responsive: true, scales: { y: { min: 0, max: 1 } } }
+            }
+        );
+
+        function updateDashboard() {
+            fetch('/metrics?' + new Date().getTime())
+                .then(r => r.ok ? r.json() : Promise.reject('Server error'))
+                .then(data => {
+                    // Update basic info
+                    document.getElementById('currentRound').textContent = data.current_round;
+                    document.getElementById('maxRounds').textContent = data.max_rounds;
+                    document.getElementById('minClients').textContent = data.min_clients;
+                    document.getElementById('readyClients').textContent = data.ready_models;
+                    
+                    // Update status
+                    let status = "Ready";
+                    if (data.current_round >= data.max_rounds) {
+                        status = "Training completed";
+                        document.getElementById('comparisonPanel').style.display = 'block';
+                        document.getElementById('comparisonImage').src = 
+                            '/static/comparison_results.png?' + new Date().getTime();
+                    } else if (data.training_active) {
+                        status = `Round ${data.current_round + 1} in progress`;
+                    } else if (data.ready_models < data.min_clients) {
+                        status = `Waiting for clients (${data.ready_models}/${data.min_clients})`;
+                    }
+                    document.getElementById('trainingStatus').textContent = status;
+                    
+                    // Update client list
+                    const clientList = document.getElementById('clientList');
+                    clientList.innerHTML = '';
+                    data.clients.forEach(client => {
+                        const badge = document.createElement('div');
+                        badge.className = 'client-badge';
+                        badge.innerHTML = `${client} <span class="client-ip">${data.client_ips[client] || ''}</span>`;
+                        clientList.appendChild(badge);
+                    });
+                    
+                    // Update charts
+                    if (data.rounds.length > 0) {
+                        lossChart.data.labels = data.rounds;
+                        lossChart.data.datasets[0].data = data.losses;
+                        lossChart.update();
+                        
+                        accuracyChart.data.labels = data.rounds;
+                        accuracyChart.data.datasets[0].data = data.accuracies;
+                        accuracyChart.update();
+                    }
+                })
+                .catch(err => {
+                    console.error('Dashboard error:', err);
+                    document.getElementById('trainingStatus').textContent = "Connection error";
+                });
+        }
+
+        // Update every 1.5 seconds
+        setInterval(updateDashboard, 1500);
+        updateDashboard(); // Initial update
+    </script>
+</body>
+</html>
